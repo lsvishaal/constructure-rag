@@ -1,0 +1,187 @@
+
+# ============================================================================
+# CONSTRUCTURE RAG - DOCKER COMPOSE
+# ============================================================================
+# Services:
+#   - backend   : FastAPI RAG server
+#   - qdrant    : Vector database
+#   - ollama    : Local LLM (optional)
+#   - streamlit : Test UI
+#
+# Usage:
+#   docker-compose up -d           # Start all services
+#   docker-compose up -d backend   # Start backend + deps only
+#   docker-compose logs -f backend # View logs
+#   docker-compose down            # Stop all
+#
+# Watermark: CONSTRUCTURE_RAG_VISHAAL_LS_2025
+# ============================================================================
+
+services:
+  # ==========================================================================
+  # Qdrant Vector Database
+  # ==========================================================================
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    container_name: constructure-qdrant
+    ports:
+      - "6333:6333"   # REST API
+      - "6334:6334"   # gRPC API
+    volumes:
+      - qdrant_data:/qdrant/storage:z
+    environment:
+      # Performance tuning for development
+      - QDRANT__LOG_LEVEL=INFO
+      - QDRANT__STORAGE__ON_DISK_PAYLOAD=true
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__SERVICE__ENABLE_CORS=true
+      # Disable telemetry for local dev
+      - QDRANT__TELEMETRY_DISABLED=true
+    healthcheck:
+      # Qdrant exposes /healthz endpoint; use bash TCP check since no curl/wget
+      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/localhost/6333'"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - constructure-net
+
+  # ==========================================================================
+  # FastAPI Backend
+  # ==========================================================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: constructure-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Server
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DEBUG=${DEBUG:-true}
+      # Security
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=1440
+      # LLM Provider - using 1B model for faster responses
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:1b}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Embedding
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-local}
+      - EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
+      # Vector DB
+      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_COLLECTION=constructure_rag
+      # Data
+      - DATA_DIR=/app/Assets
+      # CORS
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:8501,http://localhost:5173
+      # Test user
+      - TEST_USER_EMAIL=${TEST_USER_EMAIL:-testingcheckuser1234@gmail.com}
+      - TEST_USER_PASSWORD=${TEST_USER_PASSWORD:-constructure2024}
+    volumes:
+      - ./Assets:/app/Assets:ro
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/v1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - constructure-net
+
+  # ==========================================================================
+  # Ollama (Local LLM) - Optional
+  # ==========================================================================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: constructure-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - constructure-net
+    # GPU support (uncomment if NVIDIA GPU available)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # ==========================================================================
+  # Streamlit Test UI
+  # ==========================================================================
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: streamlit
+    container_name: constructure-streamlit
+    ports:
+      - "8501:8501"
+    environment:
+      # API URLs - use Docker service names, not localhost!
+      - API_BASE_URL=http://backend:8000
+      - BACKEND_URL=http://backend:8000
+      # Vector DB - Docker service name
+      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_COLLECTION=constructure_rag
+      # LLM Provider - Docker service name (1B model for speed)
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:1b}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Embedding
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-local}
+      - EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8501/_stcore/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - constructure-net
+
+# ============================================================================
+# Volumes
+# ============================================================================
+volumes:
+  qdrant_data:
+    driver: local
+  ollama_data:
+    driver: local
+
+# ============================================================================
+# Networks
+# ============================================================================
+networks:
+  constructure-net:
+    driver: bridge

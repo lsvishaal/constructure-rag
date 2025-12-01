@@ -1,0 +1,46 @@
+# Version control
+.git/
+.gitignore
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment files (secrets)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Documentation (except README)
+.docs/
+# Keep README.md - required by pyproject.toml
+
+# Misc
+.DS_Store
+*.log
+node_modules/
+.github/
+
+# Docker files (don't need to copy Dockerfile into image)
+Dockerfile
+docker-compose*.yml
+
+# Build artifacts
+*.tar.gz
+*.whl
