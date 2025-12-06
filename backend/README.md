@@ -2,17 +2,22 @@
 
 > FastAPI-powered RAG system for construction document intelligence
 
+**Watermark:** `CONSTRUCTURE_RAG_VISHAAL_LS_2025`
+
 ---
 
 ## Quick Start
 
 ```bash
-# Start all services (Qdrant, Ollama, FastAPI, Streamlit)
-docker-compose up -d
+# Start all services (Qdrant, Ollama, FastAPI)
+cd backend
+docker compose up -d
 
-# Or for local development:
-uv sync --all-extras
-uv run uvicorn src.main:app --reload --port 8000
+# Wait for services to be healthy
+docker compose ps
+
+# Verify everything is running
+curl http://localhost:8000/api/v1/health
 ```
 
 **Services:**
@@ -20,9 +25,15 @@ uv run uvicorn src.main:app --reload --port 8000
 |---------|-----|---------|
 | FastAPI | http://localhost:8000 | REST API |
 | API Docs | http://localhost:8000/docs | Swagger UI |
-| Streamlit | http://localhost:8501 | Demo UI with progress |
 | Qdrant | http://localhost:6333 | Vector database |
-| Ollama | http://localhost:11434 | LLM inference |
+| Ollama | http://localhost:11434 | LLM inference (Qwen2.5-7B) |
+| Streamlit | http://localhost:8501 | Demo UI (optional) |
+
+**Test Credentials:**
+```
+Email:    testingcheckuser1234@gmail.com
+Password: constructure2024
+```
 
 ---
 
@@ -37,8 +48,8 @@ uv run uvicorn src.main:app --reload --port 8000
 
 ┌─────────────────────────────────────────────────────────────────┐
 │                        QUERY PIPELINE                            │
-│  Query ──► Cache? ──► Retrieval ──► RAG ──► Ollama ──► Response │
-│            (LRU)     (cosine sim)  (prompt) (llama3.2)  +sources│
+│  Query ──► Cache? ──► Hybrid Retrieval ──► RAG ──► Response     │
+│            (LRU)     (Vector + BM25 + RRF)  (Qwen2.5)  +sources │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -50,10 +61,10 @@ uv run uvicorn src.main:app --reload --port 8000
 | `chunking.py` | Text Chunking | 300 words, 75 overlap, structure-aware |
 | `embeddings.py` | Vector Generation | BGE-small-en-v1.5, 384 dimensions |
 | `vector_store.py` | Storage | Qdrant with cosine similarity |
-| `retrieval.py` | Search | Top-K retrieval with scoring |
+| `retrieval.py` | Hybrid Search | Vector + BM25 + RRF fusion |
 | `rag_pipeline.py` | RAG Orchestration | LLM prompting + caching |
-| `extraction.py` | Structured Output | Door schedules, wage tables |
-| `evaluation.py` | Testing | 10 queries, automatic scoring |
+| `extraction.py` | Structured Output | Hybrid regex + LLM validation for wages |
+| `evaluation.py` | Testing | 11 queries, automatic scoring |
 | `cache.py` | Response Cache | LRU + 1hr TTL |
 | `auth.py` | Authentication | JWT + Argon2 password hashing |
 
@@ -63,8 +74,8 @@ uv run uvicorn src.main:app --reload --port 8000
 
 ### Authentication
 ```bash
-# Login (OAuth2 form)
-curl -X POST http://localhost:8000/api/v1/auth/login \
+# Login (OAuth2 form) - recommended
+curl -X POST http://localhost:8000/api/v1/auth/token \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "username=testingcheckuser1234@gmail.com&password=constructure2024"
 
@@ -72,6 +83,10 @@ curl -X POST http://localhost:8000/api/v1/auth/login \
 
 # Get current user
 curl http://localhost:8000/api/v1/auth/me \
+  -H "Authorization: Bearer <token>"
+
+# Verify token
+curl http://localhost:8000/api/v1/auth/verify \
   -H "Authorization: Bearer <token>"
 ```
 
@@ -87,43 +102,47 @@ curl -X POST http://localhost:8000/api/v1/documents/ingest \
   -H "Authorization: Bearer <token>"
 
 # List documents
-curl http://localhost:8000/api/v1/documents \
+curl http://localhost:8000/api/v1/documents/ \
   -H "Authorization: Bearer <token>"
 
 # Clear all documents
-curl -X DELETE http://localhost:8000/api/v1/documents/clear \
+curl -X DELETE http://localhost:8000/api/v1/documents/ \
   -H "Authorization: Bearer <token>"
 ```
 
-### Chat (RAG)
+### Chat (RAG) - 3 Modes
 ```bash
-# Q&A mode (default)
-curl -X POST http://localhost:8000/api/v1/chat \
+# Q&A mode (default) - natural language answers
+curl -X POST http://localhost:8000/api/v1/chat/ \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"query": "What is the plumber wage rate?", "mode": "qa"}'
+  -d '{"message": "What is the electrician wage rate?", "mode": "qa"}'
 
-# Extraction mode
-curl -X POST http://localhost:8000/api/v1/chat \
+# Extraction mode - structured data output (LLM-powered)
+curl -X POST http://localhost:8000/api/v1/chat/ \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"query": "Generate door schedule", "mode": "extraction"}'
+  -d '{"message": "Extract wage rates from the documents", "mode": "extraction"}'
 
-# Sources only mode
-curl -X POST http://localhost:8000/api/v1/chat \
+# Sources only mode - raw chunks, no LLM (fast)
+curl -X POST http://localhost:8000/api/v1/chat/ \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"query": "fire rating", "mode": "sources_only"}'
+  -d '{"message": "fire rating", "mode": "sources_only"}'
 ```
 
 ### Evaluation
 ```bash
-# Get test queries
+# Get test queries (11 predefined)
 curl http://localhost:8000/api/v1/evaluation/queries \
   -H "Authorization: Bearer <token>"
 
-# Run evaluation
+# Run evaluation (all queries)
 curl -X POST http://localhost:8000/api/v1/evaluation/run \
+  -H "Authorization: Bearer <token>"
+
+# Run with limit
+curl -X POST "http://localhost:8000/api/v1/evaluation/run?limit=5" \
   -H "Authorization: Bearer <token>"
 ```
 
@@ -208,7 +227,7 @@ SECRET_KEY=your-secret-key-generate-with-openssl
 # LLM Provider
 LLM_PROVIDER=ollama              # ollama or openai
 OLLAMA_BASE_URL=http://ollama:11434
-OLLAMA_MODEL=llama3.2:latest
+OLLAMA_MODEL=qwen2.5:7b-instruct-q4_K_M  # Qwen2.5-7B for best RAG performance
 
 # OpenAI (if using)
 OPENAI_API_KEY=sk-...
@@ -263,28 +282,34 @@ uv run pytest -v -m "not slow"
 | Metric | Value | Notes |
 |--------|-------|-------|
 | PDF Parsing | ~30 pages/sec | PyMuPDF optimized |
-| Embedding | ~100 chunks/sec | Batch size 32 |
+| Embedding | ~100 chunks/sec | Batch size 64 |
 | Vector Search | <50ms | Qdrant HNSW index |
-| LLM Response | 1-3s | Depends on query |
+| Hybrid Retrieval | <100ms | Vector + BM25 + RRF |
+| LLM Response (Q&A) | 5-10s | Qwen2.5-7B local GPU |
+| LLM Response (Extraction) | 15-25s | More complex prompting |
 | Cache Hit | <10ms | LRU with 1hr TTL |
-| Full E2E Query | 1-4s | Cold/warm cache |
+| Evaluation (5 queries) | ~30s | 80% accuracy typical |
 
 ---
 
-## Development
+## Development (Local without Docker)
 
 ```bash
+# Install UV (if not installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
 # Install dependencies
+cd backend
 uv sync --all-extras
+
+# Run server
+uv run uvicorn src.main:app --reload --port 8000
 
 # Run linter
 uv run ruff check src/
 
 # Format code
 uv run ruff format src/
-
-# Type checking
-uv run mypy src/
 ```
 
 ---
@@ -292,17 +317,21 @@ uv run mypy src/
 ## Docker
 
 ```bash
-# Build image
-docker build -t constructure-backend .
-
-# Run with compose
-docker-compose up -d
+# Build and start all services
+cd backend
+docker compose up -d
 
 # View logs
-docker-compose logs -f backend
+docker compose logs -f backend
+
+# Rebuild after code changes
+docker compose up -d --build backend
 
 # Shell into container
-docker-compose exec backend bash
+docker compose exec backend bash
+
+# Stop all
+docker compose down
 ```
 
 ---

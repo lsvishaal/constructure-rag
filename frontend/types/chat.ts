@@ -1,5 +1,7 @@
 // Chat Domain Types
 
+import { WageEntry, DoorScheduleEntry } from './extraction';
+
 export type MessageRole = 'user' | 'assistant' | 'system';
 export type ChatMode = 'qa' | 'extraction' | 'sources_only';
 
@@ -11,11 +13,21 @@ export interface Source {
   score?: number;
 }
 
+export interface StructuredData {
+  extraction_type: 'wage_table' | 'door_schedule' | 'custom';
+  entries: WageEntry[] | DoorScheduleEntry[] | Record<string, unknown>[];
+  count: number;
+}
+
+// Re-export entry types for convenience
+export type { WageEntry, DoorScheduleEntry } from './extraction';
+
 export interface ChatMessage {
   id: string;
   role: MessageRole;
   content: string;
   sources?: Source[];
+  structuredData?: StructuredData;
   timestamp: Date;
   isStreaming?: boolean;
   error?: string;
@@ -36,6 +48,7 @@ export interface ChatResponse {
   mode: ChatMode;
   cached?: boolean;
   processing_time_ms?: number;
+  structured_data?: StructuredData;
 }
 
 export interface ChatState {

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { ChatMessage, ChatMode, Source } from '@/types/chat';
+import { ChatMessage, ChatMode, Source, StructuredData } from '@/types/chat';
 import { apiClient } from '@/lib/api-client';
 import { API_ENDPOINTS } from '@/lib/constants';
 
@@ -89,29 +89,44 @@ export const useChatStore = create<ChatStore>()(
         setError(null);
         
         try {
+          // Use longer timeout for extraction mode (LLM extraction can take 2+ minutes)
+          const timeout = mode === 'extraction' ? 180000 : 60000;
+          
           const response = await apiClient.post(API_ENDPOINTS.CHAT, {
             message: query,  // Backend expects 'message' not 'query'
             mode,
+          }, {
+            timeout,
           });
           
           const data = response.data;
           
-          // Update assistant message with response
           // Map backend source fields to frontend Source type
+          const sources: Source[] = data.sources?.map((src: {
+            file_name: string;
+            page_number: number;
+            snippet: string;
+            relevance_score?: number;
+          }, idx: number) => ({
+            id: `src-${idx}`,
+            filename: src.file_name,
+            page: src.page_number,
+            content: src.snippet,
+            score: src.relevance_score ?? 0,
+          })) ?? [];
+          
+          // Map structured_data if present (for extraction mode)
+          const structuredData: StructuredData | undefined = data.structured_data ? {
+            extraction_type: data.structured_data.extraction_type,
+            entries: data.structured_data.entries,
+            count: data.structured_data.count,
+          } : undefined;
+          
+          // Update assistant message with response
           updateMessage(assistantId, {
             content: data.answer,
-            sources: data.sources?.map((src: {
-              file_name: string;
-              page_number: number;
-              snippet: string;
-              relevance_score?: number;
-            }, idx: number) => ({
-              id: `src-${idx}`,
-              filename: src.file_name,
-              page: src.page_number,
-              content: src.snippet,
-              score: src.relevance_score ?? 0,
-            })) as Source[],
+            sources,
+            structuredData,
             isStreaming: false,
           });
         } catch (err) {

@@ -37,10 +37,10 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440  # 24 hours
     
-    # LLM Provider - using 1B model for faster responses (~3x faster than 3B)
+    # LLM Provider - Qwen2.5-7B for superior RAG performance (128K context, low hallucination)
     llm_provider: Literal["ollama", "openai"] = "ollama"
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3.2:1b"  # 1B model for speed (3B is llama3.2:latest)
+    ollama_model: str = "qwen2.5:7b-instruct-q4_K_M"  # Best 7B model for RAG tasks
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     

@@ -1,11 +1,15 @@
 """
-Vector Store Service - Phase 2
+Vector Store Service - Phase 2 (Async Optimized)
 
 Qdrant vector database integration for storing and searching embeddings.
+Fully async with connection pooling and concurrent operations.
+
 Watermark: CONSTRUCTURE_RAG_VISHAAL_LS_2025
 """
 from dataclasses import dataclass
 from typing import Any
+from concurrent.futures import ThreadPoolExecutor
+import asyncio
 import uuid
 import logging
 
@@ -21,6 +25,17 @@ from src.core.config import PROJECT_CONTEXT_ID
 from src.services.embeddings import EmbeddedChunk
 
 logger = logging.getLogger(__name__)
+
+# Global thread pool for I/O-bound Qdrant operations
+_qdrant_executor: ThreadPoolExecutor | None = None
+
+def get_qdrant_executor() -> ThreadPoolExecutor:
+    """Get or create a thread pool for Qdrant operations."""
+    global _qdrant_executor
+    if _qdrant_executor is None:
+        # More workers for I/O-bound operations
+        _qdrant_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="qdrant")
+    return _qdrant_executor
 
 
 # =============================================================================
@@ -42,7 +57,7 @@ class StoredDocument:
 
 
 # =============================================================================
-# Vector Store Service
+# Vector Store Service (Async Optimized)
 # =============================================================================
 
 class VectorStoreService:
@@ -50,6 +65,11 @@ class VectorStoreService:
     Service for storing and searching document embeddings in Qdrant.
     
     Supports both in-memory mode (for testing) and server mode (production).
+    
+    Async features:
+    - Non-blocking search and store operations
+    - Thread pool for I/O-bound Qdrant calls
+    - Batch operations for efficiency
     
     Watermark: CONSTRUCTURE_RAG_VISHAAL_LS_2025
     """
@@ -116,7 +136,7 @@ class VectorStoreService:
     
     def store(self, chunk: EmbeddedChunk) -> str:
         """
-        Store a single embedded chunk.
+        Store a single embedded chunk (sync).
         
         Args:
             chunk: EmbeddedChunk to store
@@ -147,9 +167,22 @@ class VectorStoreService:
         logger.debug(f"[{self.watermark}] Stored document: {doc_id}")
         return doc_id
     
+    async def store_async(self, chunk: EmbeddedChunk) -> str:
+        """
+        Store a single embedded chunk (async).
+        
+        Args:
+            chunk: EmbeddedChunk to store
+            
+        Returns:
+            Document ID
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(get_qdrant_executor(), self.store, chunk)
+    
     def store_batch(self, chunks: list[EmbeddedChunk]) -> list[str]:
         """
-        Store multiple embedded chunks efficiently.
+        Store multiple embedded chunks efficiently (sync).
         
         Args:
             chunks: List of EmbeddedChunk objects
@@ -157,6 +190,9 @@ class VectorStoreService:
         Returns:
             List of document IDs
         """
+        if not chunks:
+            return []
+        
         doc_ids = []
         points = []
         
@@ -184,6 +220,26 @@ class VectorStoreService:
         logger.info(f"[{self.watermark}] Stored {len(chunks)} documents")
         return doc_ids
     
+    async def store_batch_async(self, chunks: list[EmbeddedChunk]) -> list[str]:
+        """
+        Store multiple embedded chunks efficiently (async).
+        
+        Args:
+            chunks: List of EmbeddedChunk objects
+            
+        Returns:
+            List of document IDs
+        """
+        if not chunks:
+            return []
+        
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            get_qdrant_executor(),
+            self.store_batch,
+            chunks
+        )
+    
     def search(
         self,
         query_vector: np.ndarray,
@@ -191,7 +247,7 @@ class VectorStoreService:
         score_threshold: float | None = None
     ) -> list[StoredDocument]:
         """
-        Search for similar documents.
+        Search for similar documents (sync).
         
         Args:
             query_vector: Query embedding vector
@@ -228,10 +284,38 @@ class VectorStoreService:
         logger.debug(f"[{self.watermark}] Search returned {len(results)} results")
         return results
     
+    async def search_async(
+        self,
+        query_vector: np.ndarray,
+        top_k: int = 5,
+        score_threshold: float | None = None
+    ) -> list[StoredDocument]:
+        """
+        Search for similar documents (async).
+        
+        Args:
+            query_vector: Query embedding vector
+            top_k: Number of results to return
+            score_threshold: Minimum similarity score (optional)
+            
+        Returns:
+            List of StoredDocument objects
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            get_qdrant_executor(),
+            lambda: self.search(query_vector, top_k, score_threshold)
+        )
+    
     def count(self) -> int:
         """Return the number of documents in the collection."""
         info = self._client.get_collection(self._collection_name)
         return info.points_count
+    
+    async def count_async(self) -> int:
+        """Return the number of documents in the collection (async)."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(get_qdrant_executor(), self.count)
     
     def delete_collection(self) -> None:
         """Delete and recreate the collection (clears all documents)."""
@@ -243,3 +327,8 @@ class VectorStoreService:
             logger.info(f"[{self.watermark}] Recreated empty collection: {self._collection_name}")
         except Exception as e:
             logger.warning(f"[{self.watermark}] Could not delete collection: {e}")
+    
+    async def delete_collection_async(self) -> None:
+        """Delete and recreate the collection (async)."""
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(get_qdrant_executor(), self.delete_collection)

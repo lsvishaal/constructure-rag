@@ -68,10 +68,11 @@ services:
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
       - ALGORITHM=HS256
       - ACCESS_TOKEN_EXPIRE_MINUTES=1440
-      # LLM Provider - using 1B model for faster responses
+      # LLM Provider - Qwen2.5-7B for superior RAG performance
+      # Using Docker Ollama container with GPU passthrough
       - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
       - OLLAMA_BASE_URL=http://ollama:11434
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:1b}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b-instruct-q4_K_M}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       # Embedding
       - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-local}
@@ -91,6 +92,8 @@ services:
     depends_on:
       qdrant:
         condition: service_healthy
+      ollama:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8000/api/v1/health"]
       interval: 10s
@@ -102,7 +105,7 @@ services:
       - constructure-net
 
   # ==========================================================================
-  # Ollama (Local LLM) - Optional
+  # Ollama (Local LLM) - Qwen2.5-7B for RAG
   # ==========================================================================
   ollama:
     image: ollama/ollama:latest
@@ -111,23 +114,26 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_NUM_PARALLEL=2
+      - OLLAMA_GPU_LAYERS=35
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
       interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+      timeout: 30s
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
     networks:
       - constructure-net
-    # GPU support (uncomment if NVIDIA GPU available)
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
+    # GPU support - enabled for RTX 3060 (6GB VRAM)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   # ==========================================================================
   # Streamlit Test UI
@@ -147,10 +153,10 @@ services:
       # Vector DB - Docker service name
       - QDRANT_URL=http://qdrant:6333
       - QDRANT_COLLECTION=constructure_rag
-      # LLM Provider - Docker service name (1B model for speed)
+      # LLM Provider - Qwen2.5-7B for RAG
       - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
       - OLLAMA_BASE_URL=http://ollama:11434
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:1b}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b-instruct-q4_K_M}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       # Embedding
       - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-local}

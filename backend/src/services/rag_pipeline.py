@@ -1,5 +1,5 @@
 """
-RAG Pipeline Service - Phase 4 (Optimized)
+RAG Pipeline Service - Phase 4 (Async Optimized)
 
 Complete RAG (Retrieval-Augmented Generation) pipeline.
 Combines retrieval with LLM generation for Q&A with citations.
@@ -9,19 +9,35 @@ Optimizations applied:
 - Structure-aware prompting for tables
 - Markdown output enforcement
 - Relevance threshold filtering
+- Fully async with concurrent operations
+- httpx async client for LLM calls
 
 Watermark: CONSTRUCTURE_RAG_VISHAAL_LS_2025
 """
 from dataclasses import dataclass, field
 from typing import Any
+from concurrent.futures import ThreadPoolExecutor
+import asyncio
 import logging
 import re
+
+import httpx
 
 from src.core.config import PROJECT_CONTEXT_ID, settings
 from src.services.retrieval import RetrievalService, RetrievalResult
 from src.services.cache import CacheService, get_cache
 
 logger = logging.getLogger(__name__)
+
+# Async HTTP client for LLM calls (reuse connection)
+_http_client: httpx.AsyncClient | None = None
+
+def get_http_client() -> httpx.AsyncClient:
+    """Get or create async HTTP client for LLM calls."""
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(timeout=60.0)
+    return _http_client
 
 
 # =============================================================================
@@ -59,7 +75,7 @@ class RAGResponse:
 
 
 # =============================================================================
-# RAG Pipeline Service
+# RAG Pipeline Service (Async Optimized)
 # =============================================================================
 
 class RAGPipeline:
@@ -67,32 +83,37 @@ class RAGPipeline:
     Complete RAG pipeline for construction document Q&A.
     
     Pipeline flow:
-    1. Retrieve relevant chunks from vector store
+    1. Retrieve relevant chunks from vector store (async)
     2. Filter by relevance threshold
     3. Build structured prompt with context
-    4. Generate answer with LLM (temperature=0)
+    4. Generate answer with LLM (async, temperature=0)
     5. Extract and format citations
+    
+    Async features:
+    - Concurrent retrieval operations
+    - Non-blocking LLM generation
+    - Connection pooling for HTTP requests
     
     Watermark: CONSTRUCTURE_RAG_VISHAAL_LS_2025
     """
     
     # ==========================================================================
-    # OPTIMIZED SYSTEM PROMPT - Forces structured output
+    # SYSTEM PROMPT - Optimized for Qwen2.5-7B RAG
     # ==========================================================================
-    SYSTEM_PROMPT = """You are a Construction Document Assistant. Answer questions using ONLY the provided context.
+    SYSTEM_PROMPT = """You are a Construction Document Assistant that provides precise, factual answers from source documents.
 
-STRICT RULES:
-1. TABULAR DATA: If the context contains rates, schedules, or lists, format as a Markdown table.
-2. NO FLUFF: Do not say "Based on the documents..." or "Here is the information...". Just answer directly.
-3. CITATIONS: End each fact with [Page X] where X is the page number from context.
-4. EXACT QUOTES: For numbers and specifications, quote exactly as written.
-5. UNCERTAINTY: If context is unclear or missing, say "Information not found in provided documents."
+CRITICAL RULES:
+1. Answer ONLY using information explicitly stated in the provided CONTEXT
+2. If the answer is not in the context, respond: "This information is not found in the provided documents."
+3. Be concise - 1-3 sentences for simple facts, tables for wage/rate data
+4. Always cite the page number: [Page X]
+5. For wage rates, use this format: "Classification: $XX.XX/hour, Fringes: $XX.XX [Page X]"
 
-OUTPUT FORMAT:
-- For wage rates: Use table with columns | Trade | Hourly Rate | Fringe Benefits |
-- For schedules: Use table with relevant columns
-- For specifications: Use bullet points with citations
-- Keep answers concise (under 200 words unless table needed)"""
+FORBIDDEN:
+- Making up information not in the context
+- Using external knowledge or statistics
+- Speculation or interpretation
+- Verbose explanations when a direct answer suffices"""
 
     CONTEXT_TEMPLATE = """CONTEXT FROM CONSTRUCTION DOCUMENTS:
 {context}
@@ -103,7 +124,7 @@ QUESTION: {question}
 ANSWER:"""
 
     # Relevance threshold - chunks below this score are filtered out
-    MIN_RELEVANCE_SCORE = 0.3
+    MIN_RELEVANCE_SCORE = 0.01  # Very low since RRF scores are rank-based (~0.03)
 
     def __init__(
         self,
@@ -114,7 +135,7 @@ ANSWER:"""
         watermark: str = PROJECT_CONTEXT_ID,
         cache: CacheService | None = None,
         enable_cache: bool = True,
-        min_relevance_score: float = 0.3
+        min_relevance_score: float = 0.01
     ):
         """
         Initialize RAG pipeline.
@@ -144,11 +165,80 @@ ANSWER:"""
         self,
         question: str,
         top_k: int = 5,
-        use_keyword_search: bool = True,  # Default to hybrid search
+        use_keyword_search: bool = True,
         bypass_cache: bool = False
     ) -> RAGResponse:
         """
-        Answer a question using RAG.
+        Answer a question using RAG (sync wrapper).
+        
+        For async code, use query_async() instead.
+        
+        Args:
+            question: User's question
+            top_k: Number of context chunks to retrieve
+            use_keyword_search: Enable hybrid keyword search
+            bypass_cache: Force fresh query, ignoring cache
+            
+        Returns:
+            RAGResponse with answer and citations
+        """
+        # Run async query in event loop - handle various event loop states
+        try:
+            # Try to get existing loop
+            try:
+                loop = asyncio.get_running_loop()
+                # We're in an async context - need to run in thread with new loop
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(
+                        asyncio.run,
+                        self._query_fresh_loop(question, top_k, use_keyword_search, bypass_cache)
+                    )
+                    return future.result(timeout=120)
+            except RuntimeError:
+                # No running loop - we can create one
+                return asyncio.run(
+                    self.query_async(question, top_k, use_keyword_search, bypass_cache)
+                )
+        except Exception as e:
+            logger.error(f"[{self.watermark}] Query error: {e}")
+            return RAGResponse(
+                answer="An error occurred while processing your question.",
+                citations=[],
+                query=question,
+                error=True,
+                error_message=str(e),
+                watermark=self.watermark
+            )
+    
+    async def _query_fresh_loop(
+        self,
+        question: str,
+        top_k: int = 5,
+        use_keyword_search: bool = True,
+        bypass_cache: bool = False
+    ) -> RAGResponse:
+        """Run query with fresh HTTP client (for thread pool execution)."""
+        # Create a fresh client for this thread
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # Temporarily store the global client and replace
+            global _http_client
+            old_client = _http_client
+            _http_client = client
+            try:
+                return await self.query_async(question, top_k, use_keyword_search, bypass_cache)
+            finally:
+                _http_client = old_client
+    
+    async def query_async(
+        self,
+        question: str,
+        top_k: int = 5,
+        use_keyword_search: bool = True,
+        bypass_cache: bool = False
+    ) -> RAGResponse:
+        """
+        Answer a question using RAG (async).
         
         Args:
             question: User's question
@@ -185,8 +275,8 @@ ANSWER:"""
                 return cached
         
         try:
-            # Retrieve relevant documents with hybrid search
-            results = self.retrieval_service.retrieve(
+            # Retrieve relevant documents with hybrid search (async)
+            results = await self.retrieval_service.retrieve_async(
                 question,
                 top_k=top_k,
                 use_keyword_search=use_keyword_search
@@ -213,8 +303,8 @@ ANSWER:"""
             # Build prompt with context
             prompt = self.build_prompt(question, top_k, filtered_results)
             
-            # Generate answer
-            answer = self._generate_answer(prompt)
+            # Generate answer (async)
+            answer = await self._generate_answer_async(prompt)
             
             # Build citations from filtered results
             citations = self._build_citations(filtered_results)
@@ -264,7 +354,7 @@ ANSWER:"""
         Returns:
             Formatted prompt string
         """
-        # Retrieve if not provided
+        # Retrieve if not provided (sync for backward compat)
         if results is None:
             results = self.retrieval_service.retrieve(question, top_k=top_k)
         
@@ -352,7 +442,23 @@ ANSWER:"""
     
     def _generate_answer(self, prompt: str) -> str:
         """
-        Generate answer using configured LLM.
+        Generate answer using configured LLM (sync wrapper).
+        
+        Args:
+            prompt: Formatted prompt with context
+            
+        Returns:
+            Generated answer text
+        """
+        try:
+            return asyncio.run(self._generate_answer_async(prompt))
+        except RuntimeError:
+            loop = asyncio.get_event_loop()
+            return loop.run_until_complete(self._generate_answer_async(prompt))
+    
+    async def _generate_answer_async(self, prompt: str) -> str:
+        """
+        Generate answer using configured LLM (async).
         
         Args:
             prompt: Formatted prompt with context
@@ -363,9 +469,9 @@ ANSWER:"""
         if self.llm_provider == "mock":
             return self._mock_generate(prompt)
         elif self.llm_provider == "ollama":
-            return self._ollama_generate(prompt)
+            return await self._ollama_generate_async(prompt)
         elif self.llm_provider == "openai":
-            return self._openai_generate(prompt)
+            return await self._openai_generate_async(prompt)
         else:
             return self._mock_generate(prompt)
     
@@ -388,31 +494,32 @@ ANSWER:"""
         
         return "Based on the available documents, I can provide information on construction specifications."
     
-    def _ollama_generate(self, prompt: str) -> str:
-        """Generate using Ollama (local LLM) - optimized for RAG accuracy and speed."""
+    async def _ollama_generate_async(self, prompt: str) -> str:
+        """Generate using Ollama (Qwen2.5-7B) - optimized for RAG accuracy."""
         try:
-            import httpx
+            client = get_http_client()
             
             # Build the full prompt with system instructions
             full_prompt = f"{self.SYSTEM_PROMPT}\n\n{prompt}"
             
-            response = httpx.post(
+            response = await client.post(
                 f"{self.ollama_url}/api/generate",
                 json={
                     "model": self.ollama_model,
                     "prompt": full_prompt,
                     "stream": False,
-                    "keep_alive": "10m",   # Keep model loaded for 10 min (faster subsequent requests)
+                    "keep_alive": "10m",   # Keep model loaded for 10 min
                     "options": {
-                        "temperature": 0,      # CRITICAL: 0 for factual RAG responses
-                        "num_predict": 300,    # Reduced from 500 - most answers don't need 500 tokens
-                        "num_ctx": 2048,       # Reduced context window for speed
-                        "top_p": 1.0,          # Disabled when temp=0
+                        "temperature": 0,      # Deterministic for factual RAG
+                        "num_predict": 300,    # Allow longer responses for tables
+                        "num_ctx": 8192,       # Qwen2.5 supports 128K, use 8K for speed
+                        "top_p": 1.0,
                         "top_k": 1,            # Most likely token only
-                        "repeat_penalty": 1.1, # Slight penalty to avoid repetition
+                        "repeat_penalty": 1.1, # Light penalty (Qwen is less repetitive)
+                        "stop": ["CONTEXT:", "QUESTION:", "---"],
                     }
                 },
-                timeout=90.0  # 90 second timeout
+                timeout=120.0  # 2 min timeout for larger model
             )
             response.raise_for_status()
             answer = response.json().get("response", "")
@@ -430,6 +537,26 @@ ANSWER:"""
         except Exception as e:
             logger.error(f"[{self.watermark}] Ollama error: {e}")
             raise Exception(f"LLM generation failed: {str(e)}")
+    
+    async def _openai_generate_async(self, prompt: str) -> str:
+        """Generate using OpenAI API - optimized async for RAG accuracy."""
+        try:
+            import openai
+            client = openai.AsyncOpenAI()
+            response = await client.chat.completions.create(
+                model=settings.openai_model,
+                messages=[
+                    {"role": "system", "content": self.SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0,  # CRITICAL: 0 for factual RAG responses
+                max_tokens=500,
+            )
+            answer = response.choices[0].message.content
+            return self._post_process_answer(answer)
+        except Exception as e:
+            logger.error(f"[{self.watermark}] OpenAI error: {e}")
+            return self._mock_generate(prompt)
     
     def _post_process_answer(self, answer: str) -> str:
         """
@@ -455,26 +582,6 @@ ANSWER:"""
                 break
         
         return answer.strip()
-    
-    def _openai_generate(self, prompt: str) -> str:
-        """Generate using OpenAI API - optimized for RAG accuracy."""
-        try:
-            import openai
-            client = openai.OpenAI()
-            response = client.chat.completions.create(
-                model=settings.openai_model,
-                messages=[
-                    {"role": "system", "content": self.SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0,  # CRITICAL: 0 for factual RAG responses
-                max_tokens=500,
-            )
-            answer = response.choices[0].message.content
-            return self._post_process_answer(answer)
-        except Exception as e:
-            logger.error(f"[{self.watermark}] OpenAI error: {e}")
-            return self._mock_generate(prompt)
     
     def _build_citations(self, results: list[RetrievalResult]) -> list[Citation]:
         """Build citations from retrieval results."""

@@ -88,7 +88,9 @@ def get_extraction_service() -> ExtractionService:
     if _extraction_service is None:
         _extraction_service = ExtractionService(
             retrieval_service=get_retrieval_service(),
-            llm_provider=settings.llm_provider
+            llm_provider=settings.llm_provider,
+            ollama_url=settings.ollama_base_url,
+            ollama_model=settings.ollama_model,
         )
     return _extraction_service
 
@@ -123,8 +125,8 @@ async def chat(
     
     try:
         if request.mode == "qa":
-            # Standard Q&A with RAG pipeline (hybrid search enabled by default)
-            rag_response = get_rag_pipeline().query(
+            # Standard Q&A with RAG pipeline (async, hybrid search enabled)
+            rag_response = await get_rag_pipeline().query_async(
                 question=request.message,
                 top_k=5,
                 use_keyword_search=True  # Enable hybrid search for better results
@@ -154,7 +156,7 @@ async def chat(
             )
             
         elif request.mode == "extraction":
-            # Structured data extraction
+            # Structured data extraction (async)
             # Detect data type from query
             data_type = "generic"
             message_lower = request.message.lower()
@@ -162,10 +164,10 @@ async def chat(
                 data_type = "door_schedule"
             elif "window" in message_lower:
                 data_type = "window_schedule"
-            elif "wage" in message_lower or "labor" in message_lower:
-                data_type = "table"
+            elif "wage" in message_lower or "labor" in message_lower or "rate" in message_lower or "classification" in message_lower:
+                data_type = "wage_table"
             
-            extraction_result = get_extraction_service().extract(
+            extraction_result = await get_extraction_service().extract_async(
                 query=request.message,
                 data_type=data_type,
                 top_k=10
@@ -185,19 +187,26 @@ async def chat(
             
             processing_time = (time.time() - start_time) * 1000
             
+            # Determine extraction type for frontend
+            extraction_type = "wage_table" if data_type == "wage_table" else "door_schedule" if data_type == "door_schedule" else "custom"
+            
             return ChatResponse(
-                answer=f"Extracted {len(extraction_result.entries)} {data_type} entries.",
+                answer=f"Extracted {len(extraction_result.entries)} {data_type.replace('_', ' ')} entries.",
                 sources=sources,
                 conversation_id=conversation_id,
                 mode=request.mode,
                 processing_time_ms=processing_time,
                 chunks_retrieved=len(sources),
-                structured_data=[entry.__dict__ if hasattr(entry, '__dict__') else entry for entry in extraction_result.entries],
+                structured_data={
+                    "extraction_type": extraction_type,
+                    "entries": extraction_result.entries,
+                    "count": len(extraction_result.entries)
+                },
             )
             
         elif request.mode == "sources_only":
-            # Just retrieve relevant chunks without LLM
-            retrieval_results = get_retrieval_service().retrieve(
+            # Just retrieve relevant chunks without LLM (async)
+            retrieval_results = await get_retrieval_service().retrieve_async(
                 query=request.message,
                 top_k=10
             )

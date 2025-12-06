@@ -4,7 +4,7 @@ import { API_BASE_URL } from './constants';
 // Create axios instance with defaults
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 120000, // 120s for LLM responses (Ollama can be slow on first load)
+  timeout: 60000, // 60s default - streaming uploads handle their own timeout
   headers: {
     'Content-Type': 'application/json',
   },

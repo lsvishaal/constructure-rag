@@ -4,12 +4,15 @@
 
 Modern React application with Framer Motion animations, JWT authentication, and real-time RAG chat functionality.
 
+**Watermark:** `CONSTRUCTURE_RAG_VISHAAL_LS_2025`
+
 ---
 
 ## Quick Start
 
 ```bash
 # Install dependencies
+cd frontend
 npm install
 
 # Start development server
@@ -23,6 +26,10 @@ Open [http://localhost:3000](http://localhost:3000)
 Email:    testingcheckuser1234@gmail.com
 Password: constructure2024
 ```
+
+**Prerequisites:**
+- Backend must be running at `http://localhost:8000`
+- Start backend first: `cd backend && docker compose up -d`
 
 ---
 
@@ -47,22 +54,24 @@ Password: constructure2024
 - JWT-based authentication with secure token storage
 - Persistent login sessions with Zustand persist
 - Protected routes with automatic redirects
-- OAuth2-compatible login flow
+- OAuth2-compatible login flow (`/api/v1/auth/token`)
 
-### Chat Interface
-- Real-time message streaming
-- Source citations with page references
-- Multi-mode support:
-  - **Q&A Mode** - Natural language answers
-  - **Extraction Mode** - Structured data output
-  - **Sources Only** - Raw document chunks
+### Chat Interface (3 Modes)
+- **Q&A Mode** - Natural language answers with source citations
+- **Extraction Mode** - Structured data output (wage tables)
+- **Sources Only** - Raw document chunks without LLM (fast)
+
+### Chat Features
+- Real-time message display
+- Source citations with file name & page references
 - Message history with session persistence
-- Typing indicators with animated loading
+- Loading indicators with animations
+- Mode selector dropdown
 
-### Document Management
-- PDF upload with progress feedback
-- Document stats display
-- Clear documents functionality
+### Extraction Display
+- `WageTable` component for wage rate data
+- `DoorScheduleTable` component for door schedules
+- Structured JSON rendered as tables
 
 ### UI/UX
 - Dark/light mode toggle
@@ -186,9 +195,9 @@ Redirect to /chat
 User Input
     │
     ▼
-POST /api/v1/chat
+POST /api/v1/chat/
 {
-  "query": "...",
+  "message": "...",
   "mode": "qa|extraction|sources_only",
   "top_k": 5
 }
@@ -199,12 +208,17 @@ Response
   "answer": "...",
   "sources": [
     {
-      "filename": "...",
-      "page": 1,
-      "content": "...",
-      "score": 0.85
+      "file_name": "...",
+      "page_number": 1,
+      "snippet": "...",
+      "relevance_score": 0.85
     }
   ],
+  "structured_data": {  // Only for extraction mode
+    "extraction_type": "wage_table",
+    "entries": [...],
+    "count": 13
+  },
   "mode": "qa"
 }
 ```

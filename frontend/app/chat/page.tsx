@@ -22,11 +22,16 @@ import {
   Zap,
   ChevronDown,
   Trash2,
+  XCircle,
+  Table,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useChatStore } from "@/lib/hooks/useChat";
 import { useAuthStore, useHasHydrated } from "@/lib/hooks/useAuth";
 import { useThemeStore } from "@/lib/hooks/useTheme";
+import { useStreamingUpload } from "@/lib/hooks/useStreamingUpload";
+import { UploadProgress } from "@/components/upload";
+import { WageTable } from "@/components/extraction";
 import { apiClient } from "@/lib/api-client";
 import { API_ENDPOINTS } from "@/lib/constants";
 import { toast } from "sonner";
@@ -38,7 +43,7 @@ import {
   overlayVariants,
   expandVariants,
 } from "@/lib/animations";
-import type { ChatMessage as ChatMessageType, Source } from "@/types/chat";
+import type { ChatMessage as ChatMessageType, Source, WageEntry } from "@/types/chat";
 
 // Source citation with premium styling
 function SourceCitation({ source, index }: { source: Source; index: number }) {
@@ -216,6 +221,20 @@ function ChatMessage({
             </AnimatePresence>
           </motion.div>
         )}
+
+        {/* Structured Data Table (for extraction mode) */}
+        {!isUser && message.structuredData && message.structuredData.entries.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="mt-4"
+          >
+            {message.structuredData.extraction_type === 'wage_table' && (
+              <WageTable entries={message.structuredData.entries as WageEntry[]} />
+            )}
+          </motion.div>
+        )}
       </div>
     </motion.div>
   );
@@ -273,10 +292,30 @@ export default function ChatPage() {
     useAuthStore();
   const hasHydrated = useHasHydrated();
   const { darkMode, toggleDarkMode } = useThemeStore();
+  
+  // Streaming upload with real-time progress
+  const { 
+    uploadWithStreaming, 
+    isUploading: uploading, 
+    progress: uploadProgress,
+    reset: resetUpload,
+    cancel: cancelUpload,
+  } = useStreamingUpload({
+    onComplete: (data) => {
+      toast.success(
+        `Indexed ${data.chunks} chunks from ${data.pages} pages in ${data.time_seconds?.toFixed(1)}s`
+      );
+      fetchDocs();
+      // Auto-hide progress after 3 seconds
+      setTimeout(() => resetUpload(), 3000);
+    },
+    onError: (error) => {
+      toast.error(error || "Failed to upload file");
+    },
+  });
 
   const [input, setInput] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [documents, setDocuments] = useState<{ total_chunks: number }>({
     total_chunks: 0,
   });
@@ -334,26 +373,11 @@ export default function ChatPage() {
       return;
     }
 
-    setUploading(true);
-    const formData = new FormData();
-    formData.append("file", file);
-
-    try {
-      const res = await apiClient.post(API_ENDPOINTS.UPLOAD, formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-        timeout: 300000,
-      });
-      toast.success(
-        `Indexed ${res.data.chunks} chunks from ${res.data.pages} pages`
-      );
-      fetchDocs();
-    } catch (err) {
-      console.error("Upload error:", err);
-      toast.error("Failed to upload file");
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
+    // Use streaming upload for real-time progress
+    await uploadWithStreaming(file);
+    
+    // Clear the input
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const [clearing, setClearing] = useState(false);
@@ -492,23 +516,57 @@ export default function ChatPage() {
                   onChange={handleUpload}
                   className="hidden"
                 />
-                <motion.div
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  <Button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploading}
-                    className="w-full justify-start gap-3 h-11 bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-lg shadow-primary/25 transition-all duration-200"
+                
+                {/* Upload button with cancel option */}
+                <div className="relative">
+                  <motion.div
+                    whileHover={!uploading ? { scale: 1.02 } : undefined}
+                    whileTap={!uploading ? { scale: 0.98 } : undefined}
                   >
-                    {uploading ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Upload className="w-4 h-4" />
-                    )}
-                    <span>{uploading ? "Processing..." : "Upload PDF"}</span>
-                  </Button>
-                </motion.div>
+                    <Button
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploading}
+                      className="w-full justify-start gap-3 h-11 bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-lg shadow-primary/25 transition-all duration-200"
+                    >
+                      {uploading ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Upload className="w-4 h-4" />
+                      )}
+                      <span className="flex-1 text-left">
+                        {uploading ? "Processing..." : "Upload PDF"}
+                      </span>
+                      {uploading && (
+                        <span className="text-xs opacity-75">
+                          {uploadProgress.progress}%
+                        </span>
+                      )}
+                    </Button>
+                  </motion.div>
+                  
+                  {/* Cancel button */}
+                  {uploading && (
+                    <motion.button
+                      initial={{ opacity: 0, scale: 0.8 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        cancelUpload();
+                        toast.info("Upload cancelled");
+                      }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg hover:bg-white/20 transition-colors"
+                      title="Cancel upload"
+                    >
+                      <XCircle className="w-4 h-4" />
+                    </motion.button>
+                  )}
+                </div>
+
+                {/* Upload Progress with detailed steps */}
+                <UploadProgress 
+                  data={uploadProgress} 
+                  isVisible={uploading || uploadProgress.step === 'complete' || uploadProgress.step === 'error'} 
+                />
 
                 {/* Document stats */}
                 <motion.div

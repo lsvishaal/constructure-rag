@@ -7,8 +7,8 @@ export interface DoorScheduleEntry {
   height_mm: number;
   fire_rating: string;
   material: string;
-  hardware_set?: string;
-  notes?: string;
+  hardware_set?: string | null;
+  notes?: string | null;
 }
 
 export interface WageEntry {
@@ -16,7 +16,7 @@ export interface WageEntry {
   base_rate: number;
   fringe_benefits: number;
   total_rate: number;
-  effective_date?: string;
+  effective_date?: string | null;
 }
 
 export interface ExtractionResult<T> {

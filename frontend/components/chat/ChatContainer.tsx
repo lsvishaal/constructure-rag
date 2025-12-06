@@ -53,10 +53,10 @@ export function ChatContainer({ className }: ChatContainerProps) {
 
 function EmptyState() {
   const suggestions = [
-    'What is the plumber wage rate?',
-    'List all door fire ratings',
-    'What are the electrician fringe benefits?',
-    'Extract the door schedule',
+    'What is the wage rate for an Electrician?',
+    'What is the General Decision Number?',
+    'What state does this cover?',
+    'What is the Executive Order 14026 minimum wage?',
   ];
 
   const { sendMessage } = useChatStore();

@@ -67,3 +67,6 @@ uv.lock
 # Misc
 *.bak
 *.tmp
+
+# Demo files (local reference only)
+docs/DEMO_SCRIPT.md

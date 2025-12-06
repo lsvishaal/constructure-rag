@@ -10,6 +10,7 @@ export const API_ENDPOINTS = {
   // Documents
   DOCUMENTS: '/api/v1/documents',
   UPLOAD: '/api/v1/documents/upload',
+  UPLOAD_STREAM: '/api/v1/documents/upload-stream',
   SMART_INGEST: '/api/v1/documents/smart-ingest',
   CLEAR_DOCUMENTS: '/api/v1/documents', // DELETE method
   

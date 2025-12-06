@@ -97,7 +97,7 @@ export function DoorScheduleTable({ entries, onExport }: DoorScheduleTableProps)
                   <td className="py-3 px-4">{entry.location || '-'}</td>
                   <td className="py-3 px-4 font-mono">{formatSize(entry.width_mm, entry.height_mm)}</td>
                   <td className="py-3 px-4">{entry.material || '-'}</td>
-                  <td className="py-3 px-4 max-w-[200px] truncate" title={entry.hardware_set}>
+                  <td className="py-3 px-4 max-w-[200px] truncate" title={entry.hardware_set ?? undefined}>
                     {entry.hardware_set || '-'}
                   </td>
                   <td className="py-3 px-4">
@@ -109,7 +109,7 @@ export function DoorScheduleTable({ entries, onExport }: DoorScheduleTableProps)
                       '-'
                     )}
                   </td>
-                  <td className="py-3 px-4 max-w-[150px] truncate text-muted-foreground" title={entry.notes}>
+                  <td className="py-3 px-4 max-w-[150px] truncate text-muted-foreground" title={entry.notes ?? undefined}>
                     {entry.notes || '-'}
                   </td>
                 </motion.tr>

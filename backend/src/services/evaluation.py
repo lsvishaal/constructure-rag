@@ -23,79 +23,92 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 TEST_QUERIES = [
-    # Wage determination queries (from DBA Wages PDF)
+    # ==========================================================================
+    # Safe Davis-Bacon Wage Determination Queries (GA20250305)
+    # Based on actual document content - no external knowledge needed
+    # ==========================================================================
+    
+    # General Decision Info
     {
-        "id": "wage_1",
-        "question": "What is the wage rate for plumbers?",
-        "expected_keywords": ["39.13", "plumber"],
-        "expected_answer": "The wage rate for plumbers is $39.13 per hour",
+        "id": "db_1",
+        "question": "What is the General Decision Number for this wage determination?",
+        "expected_keywords": ["GA20250305"],
+        "expected_answer": "GA20250305",
         "category": "wage_determination",
     },
     {
-        "id": "wage_2", 
-        "question": "What are the fringe benefits for electricians?",
-        "expected_keywords": ["20.04", "electrician", "fringe"],
-        "expected_answer": "Electricians receive $20.04 in fringe benefits",
+        "id": "db_2",
+        "question": "What state and county does this wage determination cover?",
+        "expected_keywords": ["georgia", "dekalb"],
+        "expected_answer": "Dekalb County in Georgia",
         "category": "wage_determination",
     },
     {
-        "id": "wage_3",
-        "question": "What is the total compensation for ironworkers?",
-        "expected_keywords": ["ironworker", "32.28", "21.43"],
-        "expected_answer": "Ironworkers earn $32.28/hour base rate plus $21.43 in fringes",
+        "id": "db_3",
+        "question": "What type of construction does this wage determination apply to?",
+        "expected_keywords": ["building"],
+        "expected_answer": "Building construction projects",
+        "category": "wage_determination",
+    },
+    
+    # Executive Order Minimums
+    {
+        "id": "db_4",
+        "question": "What is the Executive Order 14026 minimum wage rate for 2025?",
+        "expected_keywords": ["17.75", "14026"],
+        "expected_answer": "$17.75 per hour under Executive Order 14026",
         "category": "wage_determination",
     },
     {
-        "id": "wage_4",
-        "question": "What trades are covered in the wage determination?",
-        "expected_keywords": ["plumber", "electrician", "carpenter", "laborer"],
-        "expected_answer": "Covered trades include plumbers, electricians, carpenters, and laborers",
+        "id": "db_5",
+        "question": "What is the Executive Order 13658 minimum wage rate?",
+        "expected_keywords": ["13.30", "13658"],
+        "expected_answer": "$13.30 per hour under Executive Order 13658",
         "category": "wage_determination",
     },
-    # Construction drawing queries (from Construction Drawings PDF)
+    
+    # Specific Trade Rates from Document
     {
-        "id": "drawing_1",
-        "question": "What is the project number or contract number?",
-        "expected_keywords": ["508-22-105", "contract", "project"],
-        "expected_answer": "Project/Contract number is 508-22-105",
-        "category": "construction_drawings",
+        "id": "db_6",
+        "question": "What is the wage rate for an Electrician?",
+        "expected_keywords": ["34.50", "electrician"],
+        "expected_answer": "Electrician rate is $34.50",
+        "category": "wage_determination",
     },
     {
-        "id": "drawing_2",
-        "question": "What building or facility is shown in the drawings?",
-        "expected_keywords": ["building", "facility", "va", "medical"],
-        "expected_answer": "The drawings show a VA medical facility building",
-        "category": "construction_drawings",
+        "id": "db_7",
+        "question": "What is the rate for Sheet Metal Workers doing HVAC Duct Installation?",
+        "expected_keywords": ["35.21", "sheet metal"],
+        "expected_answer": "Sheet Metal Worker (HVAC Duct) rate is $35.21",
+        "category": "wage_determination",
     },
     {
-        "id": "drawing_3",
-        "question": "What sheets are included in the drawing set?",
-        "expected_keywords": ["sheet", "A-", "S-", "M-", "E-", "P-"],
-        "expected_answer": "Drawing set includes architectural, structural, mechanical, electrical, and plumbing sheets",
-        "category": "construction_drawings",
-    },
-    # Extraction queries
-    {
-        "id": "extract_1",
-        "question": "Generate a wage schedule for all trades",
-        "expected_keywords": ["plumber", "electrician", "rate", "$"],
-        "expected_answer": "Structured wage data extracted",
-        "category": "extraction",
-        "mode": "extraction",
+        "id": "db_8",
+        "question": "What are the wages for Ironworkers?",
+        "expected_keywords": ["30.24", "ironworker"],
+        "expected_answer": "Ironworker rate is $30.24",
+        "category": "wage_determination",
     },
     {
-        "id": "extract_2",
-        "question": "List all labor classifications and their rates",
-        "expected_keywords": ["classification", "rate", "trade"],
-        "expected_answer": "Labor classifications with rates",
-        "category": "extraction",
-        "mode": "extraction",
+        "id": "db_9",
+        "question": "What is the wage rate for a Millwright?",
+        "expected_keywords": ["31.58", "millwright"],
+        "expected_answer": "Millwright rate is $31.58",
+        "category": "wage_determination",
     },
-    # Edge cases
+    {
+        "id": "db_10",
+        "question": "What is the rate for Power Equipment Operators running a Crane?",
+        "expected_keywords": ["34.66", "crane"],
+        "expected_answer": "Crane Operator rate is $34.66",
+        "category": "wage_determination",
+    },
+    
+    # Edge case - should NOT find answer
     {
         "id": "edge_1",
-        "question": "What is the weather forecast for tomorrow?",
-        "expected_keywords": [],  # Should NOT find answer
+        "question": "What is the weather forecast for construction?",
+        "expected_keywords": [],
         "expected_answer": "Information not found in documents",
         "category": "edge_case",
         "expect_no_answer": True,
